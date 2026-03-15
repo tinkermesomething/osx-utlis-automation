@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="osx-utils-automation"
+PLIST_LABEL="com.local.$APP_NAME"
+
+CONSOLE_USER=$(stat -f "%Su" /dev/console)
+USER_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | awk '{print $2}')
+USER_UID=$(id -u "$CONSOLE_USER")
+
+PLIST_DST="$USER_HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
+APP_DST="/Applications/$APP_NAME.app"
+
+echo "==> Unloading LaunchAgent..."
+sudo -u "$CONSOLE_USER" launchctl bootout "gui/$USER_UID/$PLIST_LABEL" 2>/dev/null || true
+
+echo "==> Removing files..."
+rm -f  "$PLIST_DST"
+rm -rf "$APP_DST"
+
+echo ""
+echo "osx-utils-automation uninstalled."
+echo "Note: remove Input Monitoring permission manually in:"
+echo "  System Settings > Privacy & Security > Input Monitoring"

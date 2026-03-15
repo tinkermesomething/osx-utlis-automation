@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="osx-utils-automation"
+PLIST_LABEL="com.local.$APP_NAME"
+APP_DST="/Applications/$APP_NAME.app"
+BINARY="$APP_DST/Contents/MacOS/$APP_NAME"
+LOG_FILE="Library/Logs/$APP_NAME.log"
+PLIST_TEMPLATE="$APP_DST/Contents/Resources/$PLIST_LABEL.plist"
+
+# Detect the console user (the person sitting at the Mac, not root)
+CONSOLE_USER=$(stat -f "%Su" /dev/console)
+if [[ -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" ]]; then
+    echo "Could not determine console user; skipping LaunchAgent install."
+    exit 0
+fi
+
+USER_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | awk '{print $2}')
+USER_UID=$(id -u "$CONSOLE_USER")
+AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
+PLIST_DST="$AGENTS_DIR/$PLIST_LABEL.plist"
+
+mkdir -p "$AGENTS_DIR"
+
+# Substitute placeholders in the bundled plist template
+sed \
+    -e "s|BINARY_PATH_PLACEHOLDER|$BINARY|g" \
+    -e "s|LOG_PATH_PLACEHOLDER|$USER_HOME/$LOG_FILE|g" \
+    "$PLIST_TEMPLATE" > "$PLIST_DST"
+
+chown "$CONSOLE_USER" "$PLIST_DST"
+chmod 644 "$PLIST_DST"
+
+# Reload the agent (bootout first so plist changes are always picked up)
+sudo -u "$CONSOLE_USER" launchctl bootout "gui/$USER_UID/$PLIST_LABEL" 2>/dev/null || true
+sudo -u "$CONSOLE_USER" launchctl bootstrap "gui/$USER_UID" "$PLIST_DST"
+
+echo ""
+echo "osx-utils-automation installed."
+echo "IMPORTANT: Grant Input Monitoring permission for the keyboard switcher:"
+echo "  System Settings > Privacy & Security > Input Monitoring"
+echo "  Add: $BINARY"

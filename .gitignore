@@ -1,0 +1,9 @@
+osx-utils-automation
+osx-utils-automation.app
+PLAN.md
+dist/
+pkg-root/
+empty-root/
+uninstall-scripts/
+*.o
+*.d

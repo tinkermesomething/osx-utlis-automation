@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "VERSION=$(cat VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
+
+      - name: Build packages
+        run: bash package.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Installation
+
+            1. Download `osx-utils-automation-${{ steps.version.outputs.VERSION }}.pkg` and double-click to install.
+            2. Grant **Input Monitoring** permission when prompted:
+               `System Settings → Privacy & Security → Input Monitoring → Add the app`
+
+            ## Uninstallation
+
+            Double-click `osx-utils-automation-uninstaller-${{ steps.version.outputs.VERSION }}.pkg`.
+            Then remove the Input Monitoring entry manually in System Settings.
+
+            ## Requirements
+
+            - macOS 13 or later
+            - [DisplayLink Manager](https://www.synaptics.com/products/displaylink-graphics/downloads/macos) (for the dock watcher automation)
+          files: |
+            dist/osx-utils-automation-${{ steps.version.outputs.VERSION }}.pkg
+            dist/osx-utils-automation-uninstaller-${{ steps.version.outputs.VERSION }}.pkg
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
