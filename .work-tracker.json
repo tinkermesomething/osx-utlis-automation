@@ -1,10 +1,10 @@
 {
   "project": "osx-utils-automation",
   "current_version": {
-    "status": "in_progress",
-    "target": "1.1.0",
+    "status": "completed",
+    "target": "1.1.2",
     "date": "2026-03-16",
-    "summary": "Module registry, settings redesign (sidebar+detail), update mechanism"
+    "summary": "Module registry, settings redesign, update mechanism, welcome wizard, app icon, installer fixes"
   },
   "completed_tasks": [
     {
@@ -23,20 +23,34 @@
       "files": ["Sources/SettingsWindowController.swift", "Sources/LaunchAtLogin.swift", "Sources/MenuBarController.swift"]
     },
     {
-      "id": "step3a-settings-polish",
-      "title": "Settings polish — Launch at Login in General tab, External keyboard label, OSX layout label, Dock live status, window sizing via fittingSize",
-      "files": ["Sources/SettingsWindowController.swift"]
+      "id": "step4-update-mechanism",
+      "title": "Update mechanism — GitHub releases API polling, UpdateWindowController, skip-version, Check for Updates in menu + settings",
+      "files": ["Sources/UpdateChecker.swift", "Sources/UpdateWindowController.swift", "Sources/Config.swift", "Sources/AppDelegate.swift", "Sources/MenuBarController.swift", "Sources/SettingsWindowController.swift"]
     },
     {
-      "id": "step4-update-mechanism",
-      "title": "Update mechanism — GitHub releases API polling, UpdateWindowController, skip-version support, Check for Updates menu item",
-      "files": [
-        "Sources/UpdateChecker.swift",
-        "Sources/UpdateWindowController.swift",
-        "Sources/Config.swift",
-        "Sources/AppDelegate.swift",
-        "Sources/MenuBarController.swift"
-      ]
+      "id": "step5-welcome-wizard",
+      "title": "First-run welcome wizard — module selection on fresh install",
+      "files": ["Sources/WelcomeWindowController.swift", "Sources/AppDelegate.swift"]
+    },
+    {
+      "id": "step6-single-instance",
+      "title": "Single-instance guard — exit immediately if already running",
+      "files": ["Sources/main.swift"]
+    },
+    {
+      "id": "step7-app-icon",
+      "title": "App icon — AppIcon.icns from source artwork, wired into Info.plist and package.sh",
+      "files": ["Resources/AppIcon.icns", "Resources/AppIcon.iconset/*", "Resources/Info.plist", "install.sh", "package.sh"]
+    },
+    {
+      "id": "step8-menu-bar-icon",
+      "title": "Fix menu bar bolt icon — two palette colours (white bolt + status-coloured circle)",
+      "files": ["Sources/MenuBarController.swift"]
+    },
+    {
+      "id": "step9-installer-fixes",
+      "title": "Fix .pkg installer — /Applications path, bootout before bootstrap, clean up app bundle after package build to prevent macOS relocation bug",
+      "files": ["install.sh", "package.sh"]
     }
   ],
   "deferred_to_next_version": [
