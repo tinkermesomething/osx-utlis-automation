@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="osx-utils-automation"
 APP_BUNDLE="$APP_NAME.app"
-INSTALL_DIR="$HOME/Applications"
+INSTALL_DIR="/Applications"
 APP_DST="$INSTALL_DIR/$APP_BUNDLE"
 BINARY_DST="$APP_DST/Contents/MacOS/$APP_NAME"
 PLIST_LABEL="com.local.$APP_NAME"
