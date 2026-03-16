@@ -27,6 +27,7 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$BINARY"                                          "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+cp "$SCRIPT_DIR/Resources/AppIcon.icns"               "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 sed "s|VERSION_PLACEHOLDER|$VERSION|g" "$SCRIPT_DIR/Resources/Info.plist" > "$APP_BUNDLE/Contents/Info.plist"
 # Bundle the LaunchAgent template so postinstall can find it
 cp "$SCRIPT_DIR/com.local.$APP_NAME.plist"            "$APP_BUNDLE/Contents/Resources/$PLIST_LABEL.plist"

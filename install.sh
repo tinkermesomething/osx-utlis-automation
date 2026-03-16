@@ -32,11 +32,10 @@ sed \
     "$SCRIPT_DIR/com.local.$APP_NAME.plist" > "$PLIST_DST"
 
 echo "==> Loading LaunchAgent..."
-# Always bootout first so plist changes (e.g. KeepAlive) are picked up.
-# kickstart -k only restarts the binary; it does NOT reload the plist.
-if launchctl list "$PLIST_LABEL" &>/dev/null; then
-    launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || true
-fi
+# Always attempt bootout first — even if the agent appears stopped, it may be
+# in a broken state (e.g. binary was deleted without a proper unload).
+launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || true
+sleep 1
 launchctl bootstrap "gui/$(id -u)" "$PLIST_DST"
 echo "==> Agent loaded."
 
