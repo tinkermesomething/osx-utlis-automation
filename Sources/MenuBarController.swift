@@ -62,7 +62,7 @@ final class MenuBarController: NSObject {
 
     func updateIcon() {
         let color  = aggregateColor()
-        let config = NSImage.SymbolConfiguration(paletteColors: [color])
+        let config = NSImage.SymbolConfiguration(paletteColors: [.white, color])
         let image  = NSImage(systemSymbolName: "bolt.circle.fill", accessibilityDescription: "osx-utils-automation")?
             .withSymbolConfiguration(config)
         image?.isTemplate = false
