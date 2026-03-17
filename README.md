@@ -17,6 +17,8 @@ The current automations are built-in, but the goal is to ship a **custom automat
 ### Keyboard Layout Switcher
 Automatically switches the macOS keyboard input layout when a USB keyboard is connected or disconnected. Uses keypress learning to distinguish real keyboards from phantom HID services (e.g. Logitech Unifying Receiver).
 
+> **USB only.** Bluetooth keyboards are not currently supported. The switcher explicitly filters for USB transport — Bluetooth connect/disconnect events are not detected.
+
 ### DisplayLink Dock Watcher
 Automatically launches DisplayLink Manager when a Dell D6000 dock is connected and quits it when the dock is disconnected.
 
@@ -52,6 +54,12 @@ Then remove the Input Monitoring entry manually:
 ## Settings
 
 Click the menu bar icon → **Settings** to configure keyboard layouts. By default, layouts are auto-detected from your enabled input sources.
+
+## Alternatives considered
+
+[autokbisw](https://github.com/ohueter/autokbisw) handles per-keyboard input source switching and is solid if you're comfortable with a headless daemon and no GUI. [Hammerspoon](https://www.hammerspoon.org) can do both automations with Lua scripting. [Keyboard Maestro](https://www.keyboardmaestro.com) ($36) covers both via USB triggers.
+
+osx-utils-automation differs in that it targets non-technical users — no config files, no scripting, one-click installer, menu bar UI with settings panel — and combines both automations in a single lightweight app. The keyboard switcher also uses keypress learning to filter phantom HID devices (e.g. Logitech Unifying Receiver) that autokbisw can misidentify as keyboards.
 
 ## AI assistance disclaimer
 
