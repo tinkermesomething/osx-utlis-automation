@@ -131,6 +131,7 @@ final class DockWatcher: NSObject, Automation {
             log("DockWatcher: DisplayLink already running")
             status = .ok("Dock connected — DisplayLink running")
         } else {
+            notify(title: "Dock connected", body: "Launching DisplayLink Manager")
             launchDisplayLink()
         }
     }
@@ -138,8 +139,14 @@ final class DockWatcher: NSObject, Automation {
     private func dockDisconnected() {
         guard isEnabled else { return }
         log("DockWatcher: Dock disconnected")
+        notify(title: "Dock disconnected", body: "DisplayLink Manager quit")
         quitDisplayLink()
         status = .ok("Dock not connected")
+    }
+
+    private func notify(title: String, body: String) {
+        guard configManager.config.dockWatcher.notifications else { return }
+        NotificationManager.send(title: title, body: body)
     }
 
     // MARK: - DisplayLink control

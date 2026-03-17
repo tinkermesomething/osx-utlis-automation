@@ -31,6 +31,16 @@ sed \
 chown "$CONSOLE_USER" "$PLIST_DST"
 chmod 644 "$PLIST_DST"
 
+# Ad-hoc sign the bundle — required for UNUserNotificationCenter on macOS 13+.
+# Without at least an ad-hoc signature, requestAuthorization returns UNError Code=1.
+codesign --sign - --force --deep "$APP_DST"
+
+# Register the app bundle with LaunchServices so macOS recognises it as
+# notification-capable (required for UNUserNotificationCenter to grant permission
+# when launched as a LaunchAgent directly by launchd).
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+"$LSREGISTER" -f "$APP_DST"
+
 # Reload the agent (bootout first so plist changes are always picked up)
 sudo -u "$CONSOLE_USER" launchctl bootout "gui/$USER_UID/$PLIST_LABEL" 2>/dev/null || true
 sudo -u "$CONSOLE_USER" launchctl bootstrap "gui/$USER_UID" "$PLIST_DST"

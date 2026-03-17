@@ -1,4 +1,5 @@
 import AppKit
+import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
@@ -79,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.updateChecker.checkAsync(skippedVersions: self.configManager.config.skippedVersions)
         }
+
+        // Request notification permission upfront in the proper app launch context.
+        // Calling this from within IOHIDManager callbacks is too late — macOS won't prompt.
+        NotificationManager.requestAuthorizationIfNeeded()
 
         log("osx-utils-automation started")
     }

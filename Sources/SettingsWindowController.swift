@@ -16,10 +16,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var currentDetailView: NSView?
 
     // Keyboard panel — refs preserved across rebuilds so populateKeyboardPanel() can reach them
-    private var autoDetectCheckbox: NSButton!
-    private var macLayoutPopup:     NSPopUpButton!
-    private var pcLayoutPopup:      NSPopUpButton!
-    private var availableLayouts:   [String] = []
+    private var autoDetectCheckbox:     NSButton!
+    private var macLayoutPopup:         NSPopUpButton!
+    private var pcLayoutPopup:          NSPopUpButton!
+    private var bluetoothCheckbox:          NSButton!
+    private var activeDetectionCheckbox:    NSButton!
+    private var keyboardNotifCheckbox:      NSButton!
+    private var dockNotifCheckbox:          NSButton!
+    private var availableLayouts:           [String] = []
 
     private let sidebarTitles = [
         "General",
@@ -181,6 +185,24 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onCheckForUpdates?()
     }
 
+    @objc private func dockNotifToggled(_ sender: NSButton) {
+        configManager.setDockNotificationsEnabled(sender.state == .on)
+    }
+
+    @objc private func keyboardNotifToggled(_ sender: NSButton) {
+        configManager.setKeyboardNotificationsEnabled(sender.state == .on)
+    }
+
+    @objc private func bluetoothToggled(_ sender: NSButton) {
+        configManager.setBluetoothEnabled(sender.state == .on)
+        configManager.onChanged?()
+    }
+
+    @objc private func activeDetectionToggled(_ sender: NSButton) {
+        configManager.setActiveDetectionEnabled(sender.state == .on)
+        configManager.onChanged?()
+    }
+
     @objc private func launchAtLoginToggled(_ sender: NSButton) {
         LaunchAtLogin.setEnabled(sender.state == .on)
     }
@@ -280,7 +302,23 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         pcRow.alignment    = .top
         pcRow.spacing      = 8
 
-        let stack         = NSStackView(views: [header, autoDetectCheckbox, macRow, pcRow])
+        bluetoothCheckbox = NSButton(
+            checkboxWithTitle: "Include Bluetooth keyboards",
+            target: self, action: #selector(bluetoothToggled)
+        )
+
+        activeDetectionCheckbox = NSButton(
+            checkboxWithTitle: "Switch layout based on active keyboard",
+            target: self, action: #selector(activeDetectionToggled)
+        )
+        activeDetectionCheckbox.toolTip = "Switches layout when you start typing on a different keyboard, even if both are connected"
+
+        keyboardNotifCheckbox = NSButton(
+            checkboxWithTitle: "Show notifications",
+            target: self, action: #selector(keyboardNotifToggled)
+        )
+
+        let stack         = NSStackView(views: [header, autoDetectCheckbox, macRow, pcRow, bluetoothCheckbox, activeDetectionCheckbox, keyboardNotifCheckbox])
         stack.orientation = .vertical
         stack.alignment   = .leading
         stack.spacing     = 16
@@ -323,7 +361,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let cfg    = configManager.config.keyboardSwitcher
         let isAuto = cfg.macLayout == nil && cfg.pcLayout == nil
-        autoDetectCheckbox.state = isAuto ? .on : .off
+        autoDetectCheckbox.state      = isAuto ? .on : .off
+        bluetoothCheckbox.state       = cfg.includeBluetooth ? .on : .off
+        activeDetectionCheckbox.state = cfg.activeDetection  ? .on : .off
+        keyboardNotifCheckbox.state   = cfg.notifications    ? .on : .off
 
         if !isAuto {
             if let mac = cfg.macLayout, let idx = availableLayouts.firstIndex(of: mac) { macLayoutPopup.selectItem(at: idx) }
@@ -385,13 +426,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         divider.boxType     = .separator
 
         let body            = NSTextField(wrappingLabelWithString:
-            "Launches DisplayLink Manager when a Dell D6000 dock is connected, and quits it on disconnect. No configurable settings."
+            "Launches DisplayLink Manager when a Dell D6000 dock is connected, and quits it on disconnect."
         )
         body.textColor      = .secondaryLabelColor
         body.font           = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
+        dockNotifCheckbox = NSButton(
+            checkboxWithTitle: "Show notifications",
+            target: self, action: #selector(dockNotifToggled)
+        )
+        dockNotifCheckbox.state = configManager.config.dockWatcher.notifications ? .on : .off
+
         let v = NSView()
-        for sub in [header, statusLabel, divider, body] as [NSView] {
+        for sub in [header, statusLabel, divider, body, dockNotifCheckbox] as [NSView] {
             sub.translatesAutoresizingMaskIntoConstraints = false
             v.addSubview(sub)
         }
@@ -402,15 +449,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             statusLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
             statusLabel.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 32),
 
-            // Divider spans edge-to-edge (no horizontal margin — looks like System Settings)
             divider.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 16),
             divider.leadingAnchor.constraint(equalTo: v.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: v.trailingAnchor),
 
-            // Body text respects left/right margins and wraps correctly
             body.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 16),
             body.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 32),
             body.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -32),
+
+            dockNotifCheckbox.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12),
+            dockNotifCheckbox.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 32),
         ])
         return v
     }

@@ -352,7 +352,37 @@ Active detection is additive — connect/disconnect still switches layout. Activ
 
 | Risk | Mitigation |
 |------|------------|
-| BT sleep/wake causing spurious switches | 4-second disconnect debounce with reconnect cancellation |
-| Active detection switches on accidental keypresses | N-keypress threshold before acting |
+| BT sleep/wake causing spurious switches | 1-second disconnect debounce with reconnect cancellation |
+| Active detection switches on accidental keypresses | 1-keypress threshold (felt too slow at 3; matches USB behaviour) |
 | Built-in keyboard tracking — Apple excludes its own keyboards from some HID APIs | Test and verify IOHIDManager visibility of built-in keyboard |
 | BT behaviour varies across keyboard vendors | Test with available hardware; document known limitations |
+
+---
+
+## v1.2.0 Implementation Status
+
+### ✅ Feature 1 — Bluetooth keyboard support
+- `isTrackedExternalKeyboard` checks BT transport when `includeBluetooth` enabled
+- Transport cached at connect time (`deviceTransports[id]`) — readable at disconnect
+- 1s debounce on BT disconnect (sleep/wake resilience)
+- Tested: connect, disconnect, sleep/wake all working
+
+### ✅ Feature 2 — Active keyboard detection
+- `IOHIDManagerRegisterInputValueCallback` per-device tracking
+- `lastActiveRegistryID` + `activeKeypressThreshold = 1`
+- Tested: switching between built-in and BT keyboard works
+
+### ✅ Config changes
+- `includeBluetooth: Bool = false`
+- `activeDetection: Bool = false`
+- `notifications: Bool = true` (both modules)
+- All four settings exposed in SettingsWindowController
+
+### ✅ Toast notifications
+- `NotificationManager.swift` — `UNUserNotificationCenter` wrapper
+- Per-module `notify()` helpers gated on config toggle
+- `requestAuthorizationIfNeeded()` called in `applicationDidFinishLaunching`
+- Root cause of denial: app was **unsigned** — `UNError Code=1` (notificationsNotAllowed)
+- **Fix:** ad-hoc codesign (`codesign --sign - --force --deep`) added to `install.sh` and `scripts/postinstall`
+- Also fixed: `CFBundlePackageType = APPL` added to Info.plist; `launchctl asuser` for proper session context
+- Tested: notifications fire on keyboard connect/disconnect and dock events
