@@ -1,7 +1,6 @@
 osx-utils-automation
 osx-utils-automation.app
 .build/
-PLAN.md
 dist/
 pkg-root/
 empty-root/
