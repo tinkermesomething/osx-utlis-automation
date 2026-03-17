@@ -19,32 +19,68 @@ struct Config: Codable {
     var skippedVersions   = [String]()
 
     struct KeyboardSwitcherConfig: Codable {
-        var enabled: Bool
-        var macLayout: String?
-        var pcLayout:  String?
+        var enabled:           Bool
+        var macLayout:         String?
+        var pcLayout:          String?
+        var includeBluetooth:  Bool
+        var activeDetection:   Bool
+        var notifyUSB:         Bool
+        var notifyBluetooth:   Bool
 
-        init(enabled: Bool = true, macLayout: String? = nil, pcLayout: String? = nil) {
-            self.enabled   = enabled
-            self.macLayout = macLayout
-            self.pcLayout  = pcLayout
+        init(enabled: Bool = true, macLayout: String? = nil, pcLayout: String? = nil,
+             includeBluetooth: Bool = false, activeDetection: Bool = false,
+             notifyUSB: Bool = true, notifyBluetooth: Bool = true) {
+            self.enabled          = enabled
+            self.macLayout        = macLayout
+            self.pcLayout         = pcLayout
+            self.includeBluetooth = includeBluetooth
+            self.activeDetection  = activeDetection
+            self.notifyUSB        = notifyUSB
+            self.notifyBluetooth  = notifyBluetooth
         }
 
         init(from decoder: Decoder) throws {
             let c  = try decoder.container(keyedBy: CodingKeys.self)
-            enabled   = try c.decodeIfPresent(Bool.self,   forKey: .enabled)   ?? true
-            macLayout = try c.decodeIfPresent(String.self, forKey: .macLayout)
-            pcLayout  = try c.decodeIfPresent(String.self, forKey: .pcLayout)
+            enabled          = try c.decodeIfPresent(Bool.self,   forKey: .enabled)          ?? true
+            macLayout        = try c.decodeIfPresent(String.self, forKey: .macLayout)
+            pcLayout         = try c.decodeIfPresent(String.self, forKey: .pcLayout)
+            includeBluetooth = try c.decodeIfPresent(Bool.self,   forKey: .includeBluetooth) ?? false
+            activeDetection  = try c.decodeIfPresent(Bool.self,   forKey: .activeDetection)  ?? false
+            notifyUSB        = try c.decodeIfPresent(Bool.self,   forKey: .notifyUSB)       ?? true
+            notifyBluetooth  = try c.decodeIfPresent(Bool.self,   forKey: .notifyBluetooth) ?? true
         }
     }
 
     struct DockWatcherConfig: Codable {
-        var enabled: Bool
+        var enabled:       Bool
+        var notifications: Bool
+        var dockVendorID:  Int?     // nil = not configured
+        var dockProductID: Int?
+        var dockName:      String?  // display only
+        var appBundleID:   String?  // used for launch + quit
+        var appName:       String?  // display only
 
-        init(enabled: Bool = true) { self.enabled = enabled }
+        init(enabled: Bool = true, notifications: Bool = true,
+             dockVendorID: Int? = nil, dockProductID: Int? = nil, dockName: String? = nil,
+             appBundleID: String? = nil, appName: String? = nil) {
+            self.enabled       = enabled
+            self.notifications = notifications
+            self.dockVendorID  = dockVendorID
+            self.dockProductID = dockProductID
+            self.dockName      = dockName
+            self.appBundleID   = appBundleID
+            self.appName       = appName
+        }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+            enabled       = try c.decodeIfPresent(Bool.self,   forKey: .enabled)       ?? true
+            notifications = try c.decodeIfPresent(Bool.self,   forKey: .notifications) ?? true
+            dockVendorID  = try c.decodeIfPresent(Int.self,    forKey: .dockVendorID)
+            dockProductID = try c.decodeIfPresent(Int.self,    forKey: .dockProductID)
+            dockName      = try c.decodeIfPresent(String.self, forKey: .dockName)
+            appBundleID   = try c.decodeIfPresent(String.self, forKey: .appBundleID)
+            appName       = try c.decodeIfPresent(String.self, forKey: .appName)
         }
     }
 
@@ -139,6 +175,44 @@ final class ConfigManager {
         if !config.skippedVersions.contains(version) {
             config.skippedVersions.append(version)
         }
+        save()
+    }
+
+    func setKeyboardUSBNotificationsEnabled(_ enabled: Bool) {
+        config.keyboardSwitcher.notifyUSB = enabled
+        save()
+    }
+
+    func setKeyboardBluetoothNotificationsEnabled(_ enabled: Bool) {
+        config.keyboardSwitcher.notifyBluetooth = enabled
+        save()
+    }
+
+    func setDockNotificationsEnabled(_ enabled: Bool) {
+        config.dockWatcher.notifications = enabled
+        save()
+    }
+
+    func setDockDevice(vendorID: Int, productID: Int, name: String) {
+        config.dockWatcher.dockVendorID  = vendorID
+        config.dockWatcher.dockProductID = productID
+        config.dockWatcher.dockName      = name
+        save()
+    }
+
+    func setDockApp(bundleID: String, name: String) {
+        config.dockWatcher.appBundleID = bundleID
+        config.dockWatcher.appName     = name
+        save()
+    }
+
+    func setBluetoothEnabled(_ enabled: Bool) {
+        config.keyboardSwitcher.includeBluetooth = enabled
+        save()
+    }
+
+    func setActiveDetectionEnabled(_ enabled: Bool) {
+        config.keyboardSwitcher.activeDetection = enabled
         save()
     }
 

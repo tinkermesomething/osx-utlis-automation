@@ -40,6 +40,17 @@ final class KeyboardSwitcher: NSObject, Automation {
     private var resolvedMacLayout: String?
     private var resolvedPcLayout:  String?
 
+    // BT disconnect debounce — keyed by registry ID, cancelled on reconnect
+    private var disconnectTimers: [UInt64: DispatchWorkItem] = [:]
+
+    // Transport stored at connect time — device properties may be unreadable on disconnect
+    private var deviceTransports: [UInt64: String] = [:]
+
+    // Active keyboard detection — tracks last device to produce a keypress
+    private var lastActiveRegistryID: UInt64? = nil
+    private var activeKeypressCount:  Int      = 0
+    private let activeKeypressThreshold = 1    // keypresses before switching
+
     private struct DeviceKey: Hashable { let vendorID: Int; let productID: Int }
     private let APPLE_VENDOR_ID = 0x05AC
 
@@ -127,6 +138,11 @@ final class KeyboardSwitcher: NSObject, Automation {
             hidContext = nil
         }
         connectedKeyboards.removeAll()
+        deviceTransports.removeAll()
+        disconnectTimers.values.forEach { $0.cancel() }
+        disconnectTimers.removeAll()
+        lastActiveRegistryID = nil
+        activeKeypressCount  = 0
         initialEnumerationDone = false
         status = .disabled
         log("KeyboardSwitcher: Stopped")
@@ -135,50 +151,148 @@ final class KeyboardSwitcher: NSObject, Automation {
     deinit { if isEnabled { stop() } }
 
     func reloadConfig(from config: Config) {
-        let shouldBeEnabled = config.keyboardSwitcher.enabled
-        if shouldBeEnabled && !isEnabled { start(); return }
-        if !shouldBeEnabled && isEnabled { stop();  return }
-        // Already in the right state — refresh layouts if running
-        if isEnabled, let layouts = resolveLayouts() {
-            resolvedMacLayout = layouts.mac
-            resolvedPcLayout  = layouts.pc
-            updateLayoutAndStatus()
+        let cfg = config.keyboardSwitcher
+        if cfg.enabled && !isEnabled { start(); return }
+        if !cfg.enabled && isEnabled { stop();  return }
+        // Restart if BT or activeDetection changed — IOHIDManager needs to re-open
+        // with updated filtering. Simplest correct approach: full restart.
+        if isEnabled {
+            stop()
+            start()
         }
     }
 
     // MARK: - Device callbacks
 
     private func deviceConnected(_ device: IOHIDDevice) {
-        guard isEnabled, isNonAppleUSBDevice(device) else { return }
+        guard isEnabled, isTrackedExternalKeyboard(device) else { return }
         let id   = registryID(device)
         let key  = deviceKey(device)
         let name = strVal(device, kIOHIDProductKey)
+
+        // Cancel any pending disconnect debounce for this device (BT sleep/wake)
+        if let timer = disconnectTimers.removeValue(forKey: id) {
+            timer.cancel()
+            log("KeyboardSwitcher: Reconnected '\(name)' within debounce window — no layout change")
+            return
+        }
+
+        let transport = strVal(device, kIOHIDTransportKey)
         connectedKeyboards[id] = key
-        log("KeyboardSwitcher: Connected '\(name)' vendor=0x\(String(key.vendorID, radix: 16)) known=\(knownKeyboards.contains(key))")
-        if initialEnumerationDone { updateLayoutAndStatus() }
+        deviceTransports[id]   = transport
+        log("KeyboardSwitcher: Connected '\(name)' transport=\(transport) known=\(knownKeyboards.contains(key))")
+        if initialEnumerationDone {
+            // Only notify if this keyboard is already known (layout will actually switch)
+            if knownKeyboards.contains(key), let pc = resolvedPcLayout {
+                let isBT = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
+                notify(title: "\(isBT ? "Bluetooth" : "USB") keyboard connected",
+                       body:  "Switching to \(shortName(pc))", transport: transport)
+            }
+            updateLayoutAndStatus()
+        }
     }
 
     private func deviceDisconnected(_ device: IOHIDDevice) {
-        guard isEnabled, isNonAppleUSBDevice(device) else { return }
-        let id   = registryID(device)
-        let name = strVal(device, kIOHIDProductKey)
-        guard connectedKeyboards.removeValue(forKey: id) != nil else { return }
-        log("KeyboardSwitcher: Disconnected '\(name)' real=\(realKeyboardCount())")
-        updateLayoutAndStatus()
+        guard isEnabled else { return }
+        let id = registryID(device)
+        // Use stored transport — device properties may be unreadable at disconnect time
+        guard connectedKeyboards[id] != nil else { return }
+        let name      = strVal(device, kIOHIDProductKey)
+        let transport = deviceTransports[id] ?? ""
+        let isBluetooth = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
+
+        if isBluetooth {
+            // Notify immediately so user knows what's happening during the debounce wait
+            let isLastExternal = isKnownDevice(id) && realKeyboardCount() == 1
+            if isLastExternal, let mac = resolvedMacLayout {
+                notify(title: "Bluetooth keyboard disconnected",
+                       body:  "Switching to \(shortName(mac)) in 1s", transport: transport)
+            }
+            // Debounce BT disconnects — keyboard may just be going to sleep
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.disconnectTimers.removeValue(forKey: id)
+                self.connectedKeyboards.removeValue(forKey: id)
+                self.deviceTransports.removeValue(forKey: id)
+                log("KeyboardSwitcher: Disconnected (BT, confirmed) '\(name)'")
+                if let mac = self.resolvedMacLayout, self.realKeyboardCount() == 0 {
+                    self.notify(title: "Layout switched",
+                                body:  "Now using \(self.shortName(mac))", transport: transport)
+                }
+                self.updateLayoutAndStatus()
+            }
+            disconnectTimers[id] = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+            log("KeyboardSwitcher: Disconnect debounce started for '\(name)' (1s)")
+        } else {
+            let isLastExternal = isKnownDevice(id) && realKeyboardCount() == 1
+            connectedKeyboards.removeValue(forKey: id)
+            deviceTransports.removeValue(forKey: id)
+            log("KeyboardSwitcher: Disconnected '\(name)' real=\(realKeyboardCount())")
+            if isLastExternal, let mac = resolvedMacLayout {
+                notify(title: "USB keyboard disconnected",
+                       body:  "Switching to \(shortName(mac))", transport: transport)
+            }
+            updateLayoutAndStatus()
+        }
     }
 
     private func inputReceived(_ value: IOHIDValue) {
         guard isEnabled else { return }
         let elem = IOHIDValueGetElement(value)
         guard IOHIDElementGetUsage(elem) > 3 else { return }
-        let device = IOHIDElementGetDevice(elem)
-        guard isNonAppleUSBDevice(device) else { return }
-        let key  = deviceKey(device)
-        let name = strVal(device, kIOHIDProductKey)
-        guard knownKeyboards.insert(key).inserted else { return }
-        log("KeyboardSwitcher: Learned '\(name)' vendor=0x\(String(key.vendorID, radix: 16))")
-        saveKnownKeyboards()
-        updateLayoutAndStatus()
+        let device     = IOHIDElementGetDevice(elem)
+        let cfg        = configManager.config.keyboardSwitcher
+        let isBuiltIn  = isBuiltInKeyboard(device)
+        let isExternal = isTrackedExternalKeyboard(device)
+
+        guard isExternal || (cfg.activeDetection && isBuiltIn) else { return }
+
+        // Keyboard learning — only for external keyboards
+        if isExternal {
+            let key  = deviceKey(device)
+            let name = strVal(device, kIOHIDProductKey)
+            if knownKeyboards.insert(key).inserted {
+                log("KeyboardSwitcher: Learned '\(name)' vendor=0x\(String(key.vendorID, radix: 16))")
+                saveKnownKeyboards()
+                // First keypress on a new keyboard — notify that we're switching
+                let transport = strVal(device, kIOHIDTransportKey)
+                let isBT = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
+                if let pc = resolvedPcLayout {
+                    notify(title: "\(isBT ? "Bluetooth" : "USB") keyboard detected",
+                           body:  "Switching to \(shortName(pc))", transport: transport)
+                }
+                updateLayoutAndStatus()
+            }
+        }
+
+        // Active keyboard detection
+        guard cfg.activeDetection else { return }
+        let id = registryID(device)
+        if id == lastActiveRegistryID {
+            // Same keyboard — no action needed
+            return
+        }
+        activeKeypressCount = (lastActiveRegistryID == nil) ? activeKeypressThreshold : 1
+        lastActiveRegistryID = id
+        if activeKeypressCount < activeKeypressThreshold { return }
+
+        // Threshold reached — switch based on whether active keyboard is external or built-in
+        if isExternal, let key = connectedKeyboards[id], knownKeyboards.contains(key) {
+            if let pc = resolvedPcLayout {
+                let t = deviceTransports[id] ?? ""
+                notify(title: "External keyboard active", body: "Switched to \(shortName(pc))", transport: t)
+                switchTo(pc)
+                status = .ok("Active: external keyboard — \(shortName(pc))")
+            }
+        } else if isBuiltIn {
+            if let mac = resolvedMacLayout {
+                // Built-in keyboard is neither USB nor BT external — gate on USB toggle
+                notify(title: "Built-in keyboard active", body: "Switched to \(shortName(mac))", transport: "USB")
+                switchTo(mac)
+                status = .ok("Active: built-in keyboard — \(shortName(mac))")
+            }
+        }
     }
 
     // MARK: - Layout switching
@@ -247,8 +361,20 @@ final class KeyboardSwitcher: NSObject, Automation {
 
     // MARK: - Helpers
 
-    private func isNonAppleUSBDevice(_ device: IOHIDDevice) -> Bool {
-        strVal(device, kIOHIDTransportKey) == "USB" && intVal(device, kIOHIDVendorIDKey) != APPLE_VENDOR_ID
+    /// External keyboard we're tracking — USB always, BT if opted in. Never Apple-branded.
+    private func isTrackedExternalKeyboard(_ device: IOHIDDevice) -> Bool {
+        guard intVal(device, kIOHIDVendorIDKey) != APPLE_VENDOR_ID else { return false }
+        let transport = strVal(device, kIOHIDTransportKey)
+        if transport == "USB" { return true }
+        let cfg = configManager.config.keyboardSwitcher
+        return cfg.includeBluetooth && (transport == "Bluetooth" || transport == "BluetoothLowEnergy")
+    }
+
+    /// Built-in MacBook keyboard — Apple device on SPI (Apple Silicon) or USB (Intel).
+    private func isBuiltInKeyboard(_ device: IOHIDDevice) -> Bool {
+        guard intVal(device, kIOHIDVendorIDKey) == APPLE_VENDOR_ID else { return false }
+        let transport = strVal(device, kIOHIDTransportKey)
+        return transport == "SPI" || transport == "USB"
     }
 
     private func deviceKey(_ device: IOHIDDevice) -> DeviceKey {
@@ -272,6 +398,19 @@ final class KeyboardSwitcher: NSObject, Automation {
 
     private func shortName(_ id: String) -> String {
         id.replacingOccurrences(of: "com.apple.keylayout.", with: "")
+    }
+
+    /// True if the device with this registry ID is a known (learned) keyboard.
+    private func isKnownDevice(_ id: UInt64) -> Bool {
+        guard let key = connectedKeyboards[id] else { return false }
+        return knownKeyboards.contains(key)
+    }
+
+    private func notify(title: String, body: String, transport: String) {
+        let cfg  = configManager.config.keyboardSwitcher
+        let isBT = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
+        guard isBT ? cfg.notifyBluetooth : cfg.notifyUSB else { return }
+        NotificationManager.send(title: title, body: body)
     }
 
     // MARK: - Persistence

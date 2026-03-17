@@ -30,7 +30,7 @@ final class MenuBarController: NSObject {
 
     // MARK: - Setup
 
-    func start() {
+    func start(wiringConfigWatcher: Bool = true) {
         statusItem      = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         menu.delegate   = self
         statusItem.menu = menu
@@ -41,6 +41,12 @@ final class MenuBarController: NSObject {
             DispatchQueue.main.async { self?.updateIcon() }
         }
 
+        if wiringConfigWatcher { startConfigWatcher() }
+    }
+
+    /// Wire the FSEvents-driven config reload. Called separately on first run so that
+    /// config writes during the welcome wizard don't trigger startAll() prematurely.
+    func startConfigWatcher() {
         // Config file changed on disk — delegate to registry which handles reload + rebuild
         configManager.onChanged = { [weak self] in
             guard let self else { return }
