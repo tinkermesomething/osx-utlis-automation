@@ -1,5 +1,9 @@
 # osx-utils-automation
 
+<p align="center">
+  <img src="osx-utils-automation_icon_2.jpg" alt="osx-utils-automation icon" width="128">
+</p>
+
 macOS has no built-in way to react to hardware events. Connecting a USB keyboard doesn't switch your input layout. Plugging in a dock doesn't launch the software it needs. You end up doing the same manual steps every time — switching layouts, launching DisplayLink, killing it when you unplug.
 
 osx-utils-automation fixes that. It runs silently in the menu bar, watches for hardware changes, and handles the repetitive stuff automatically.
@@ -48,6 +52,12 @@ Then remove the Input Monitoring entry manually:
 ## Settings
 
 Click the menu bar icon → **Settings** to configure keyboard layouts. By default, layouts are auto-detected from your enabled input sources.
+
+## AI assistance disclaimer
+
+This project was designed, architected, and driven by a human developer. [Claude](https://claude.ai) (Anthropic) was used as a development assistant throughout — writing and reviewing code, debugging, and suggesting approaches — in the same way a senior developer might pair-program with a colleague. Every decision was reviewed, tested, and approved by the project owner.
+
+This is not vibe-coded. There is a distinction.
 
 ## Security disclaimer
 
