@@ -62,13 +62,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if isFirstRun {
-            // Show welcome wizard; startAll() is deferred until user taps "Get Started"
+            // Don't wire configManager.onChanged yet — any config write during the wizard
+            // (e.g. module toggles, keyboard layout saves) fires FSEvents → reloadFromConfig()
+            // → automation.reloadConfig() → start() → IOHIDManager → Input Monitoring prompt
+            // mid-wizard. Defer the watcher until the wizard completes.
+            menuBarController.start(wiringConfigWatcher: false)
             welcomeWindowController = WelcomeWindowController(configManager: configManager, moduleRegistry: moduleRegistry)
             welcomeWindowController.onCompleted = { [weak self] in
-                self?.moduleRegistry.startAll()
+                guard let self else { return }
+                self.menuBarController.startConfigWatcher()
+                // Request notification permission before starting modules — calling
+                // this from within IOHIDManager callbacks is too late, macOS won't prompt.
+                NotificationManager.requestAuthorizationIfNeeded()
+                self.moduleRegistry.startAll()
             }
             welcomeWindowController.show()
         } else {
+            menuBarController.start()
+            // Request notification permission upfront in the proper app launch context.
+            NotificationManager.requestAuthorizationIfNeeded()
             moduleRegistry.startAll()
         }
 
@@ -80,10 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.updateChecker.checkAsync(skippedVersions: self.configManager.config.skippedVersions)
         }
-
-        // Request notification permission upfront in the proper app launch context.
-        // Calling this from within IOHIDManager callbacks is too late — macOS won't prompt.
-        NotificationManager.requestAuthorizationIfNeeded()
 
         log("osx-utils-automation started")
     }

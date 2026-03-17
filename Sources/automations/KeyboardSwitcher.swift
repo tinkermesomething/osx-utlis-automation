@@ -186,7 +186,7 @@ final class KeyboardSwitcher: NSObject, Automation {
             if knownKeyboards.contains(key), let pc = resolvedPcLayout {
                 let isBT = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
                 notify(title: "\(isBT ? "Bluetooth" : "USB") keyboard connected",
-                       body:  "Switching to \(shortName(pc))")
+                       body:  "Switching to \(shortName(pc))", transport: transport)
             }
             updateLayoutAndStatus()
         }
@@ -206,7 +206,7 @@ final class KeyboardSwitcher: NSObject, Automation {
             let isLastExternal = isKnownDevice(id) && realKeyboardCount() == 1
             if isLastExternal, let mac = resolvedMacLayout {
                 notify(title: "Bluetooth keyboard disconnected",
-                       body:  "Switching to \(shortName(mac)) in 1s")
+                       body:  "Switching to \(shortName(mac)) in 1s", transport: transport)
             }
             // Debounce BT disconnects — keyboard may just be going to sleep
             let work = DispatchWorkItem { [weak self] in
@@ -217,7 +217,7 @@ final class KeyboardSwitcher: NSObject, Automation {
                 log("KeyboardSwitcher: Disconnected (BT, confirmed) '\(name)'")
                 if let mac = self.resolvedMacLayout, self.realKeyboardCount() == 0 {
                     self.notify(title: "Layout switched",
-                                body:  "Now using \(self.shortName(mac))")
+                                body:  "Now using \(self.shortName(mac))", transport: transport)
                 }
                 self.updateLayoutAndStatus()
             }
@@ -231,7 +231,7 @@ final class KeyboardSwitcher: NSObject, Automation {
             log("KeyboardSwitcher: Disconnected '\(name)' real=\(realKeyboardCount())")
             if isLastExternal, let mac = resolvedMacLayout {
                 notify(title: "USB keyboard disconnected",
-                       body:  "Switching to \(shortName(mac))")
+                       body:  "Switching to \(shortName(mac))", transport: transport)
             }
             updateLayoutAndStatus()
         }
@@ -260,7 +260,7 @@ final class KeyboardSwitcher: NSObject, Automation {
                 let isBT = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
                 if let pc = resolvedPcLayout {
                     notify(title: "\(isBT ? "Bluetooth" : "USB") keyboard detected",
-                           body:  "Switching to \(shortName(pc))")
+                           body:  "Switching to \(shortName(pc))", transport: transport)
                 }
                 updateLayoutAndStatus()
             }
@@ -280,13 +280,15 @@ final class KeyboardSwitcher: NSObject, Automation {
         // Threshold reached — switch based on whether active keyboard is external or built-in
         if isExternal, let key = connectedKeyboards[id], knownKeyboards.contains(key) {
             if let pc = resolvedPcLayout {
-                notify(title: "External keyboard active", body: "Switched to \(shortName(pc))")
+                let t = deviceTransports[id] ?? ""
+                notify(title: "External keyboard active", body: "Switched to \(shortName(pc))", transport: t)
                 switchTo(pc)
                 status = .ok("Active: external keyboard — \(shortName(pc))")
             }
         } else if isBuiltIn {
             if let mac = resolvedMacLayout {
-                notify(title: "Built-in keyboard active", body: "Switched to \(shortName(mac))")
+                // Built-in keyboard is neither USB nor BT external — gate on USB toggle
+                notify(title: "Built-in keyboard active", body: "Switched to \(shortName(mac))", transport: "USB")
                 switchTo(mac)
                 status = .ok("Active: built-in keyboard — \(shortName(mac))")
             }
@@ -404,8 +406,10 @@ final class KeyboardSwitcher: NSObject, Automation {
         return knownKeyboards.contains(key)
     }
 
-    private func notify(title: String, body: String) {
-        guard configManager.config.keyboardSwitcher.notifications else { return }
+    private func notify(title: String, body: String, transport: String) {
+        let cfg  = configManager.config.keyboardSwitcher
+        let isBT = transport == "Bluetooth" || transport == "BluetoothLowEnergy"
+        guard isBT ? cfg.notifyBluetooth : cfg.notifyUSB else { return }
         NotificationManager.send(title: title, body: body)
     }
 

@@ -7,3 +7,4 @@ empty-root/
 uninstall-scripts/
 *.o
 *.d
+PLAN.md
