@@ -29,7 +29,7 @@ final class ModuleRegistry {
         ),
     ]
 
-    /// Currently active automations (those whose IDs are in config.registeredModules)
+    /// Currently active automations — built-in modules + user-defined runners
     private(set) var active: [any Automation] = []
 
     private let configManager: ConfigManager
@@ -78,13 +78,19 @@ final class ModuleRegistry {
     // MARK: - Config reload
 
     /// Called when config.json changes on disk (FSEvents). Reloads each active automation.
-    /// If registeredModules changed in the file, rebuilds the active list.
+    /// Handles built-in module list changes and user module add/edit/delete.
     func reloadFromConfig() {
-        let newRegistered = configManager.config.registeredModules
-        let currentIds    = active.map { $0.id }
+        let config        = configManager.config
+        let newRegistered = config.registeredModules
+        let newUserIDs    = config.userModules.filter { $0.enabled }.map { $0.id }
 
-        if newRegistered.sorted() != currentIds.sorted() {
-            // Module list changed in config file — rebuild
+        let currentBuiltInIDs = active.filter { !isUserModuleID($0.id) }.map { $0.id }
+        let currentUserIDs    = active.filter {  isUserModuleID($0.id) }.map { $0.id }
+
+        let builtInChanged = newRegistered.sorted() != currentBuiltInIDs.sorted()
+        let userChanged    = newUserIDs.sorted()    != currentUserIDs.sorted()
+
+        if builtInChanged || userChanged {
             for automation in active {
                 if automation.isEnabled { automation.stop() }
                 automation.onStatusChanged = nil
@@ -92,8 +98,6 @@ final class ModuleRegistry {
             buildActive()
             startAll()
         } else {
-            // Same modules — just forward config changes
-            let config = configManager.config
             for automation in active { automation.reloadConfig(from: config) }
         }
         onChanged?()
@@ -102,10 +106,24 @@ final class ModuleRegistry {
     // MARK: - Private
 
     private func buildActive() {
-        let registered = configManager.config.registeredModules
-        active = ModuleRegistry.available
+        let config     = configManager.config
+        let registered = config.registeredModules
+
+        let builtIns = ModuleRegistry.available
             .filter { registered.contains($0.id) }
             .map    { wired($0.make(configManager)) }
+
+        let userRunners = config.userModules
+            .filter { $0.enabled }
+            .map    { wired(UserModuleRunner(moduleConfig: $0, configManager: configManager)) }
+
+        active = builtIns + userRunners
+    }
+
+    /// User module IDs are UUIDs — built-in IDs are readable slugs like "keyboard-switcher".
+    /// UUIDs always contain hyphens and are 36 chars; slugs never are.
+    private func isUserModuleID(_ id: String) -> Bool {
+        id.count == 36 && id.filter({ $0 == "-" }).count == 4
     }
 
     private func wired(_ automation: any Automation) -> any Automation {

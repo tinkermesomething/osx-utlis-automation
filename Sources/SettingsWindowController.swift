@@ -41,7 +41,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var availableLayouts:           [String] = []
 
     private enum SidebarItem: Equatable {
-        case general, modules, keyboard, dock, notifications
+        case general, modules, keyboard, dock, notifications, userModules
         var title: String {
             switch self {
             case .general:       return "General"
@@ -49,6 +49,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             case .keyboard:      return "Keyboard Layout"
             case .dock:          return "Dock Watcher"
             case .notifications: return "Notifications"
+            case .userModules:   return "My Automations"
             }
         }
     }
@@ -63,6 +64,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         items.append(.modules)
         if active.contains(where: { $0.id == "keyboard-switcher" }) { items.append(.keyboard) }
         if active.contains(where: { $0.id == "dock-watcher" })      { items.append(.dock) }
+        // Always show My Automations — it's the entry point for creating user modules
+        items.append(.userModules)
         return items
     }
 
@@ -181,6 +184,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case .keyboard:      view = makeKeyboardPanel()
         case .dock:          view = makeDockPanel()
         case .notifications: view = makeNotificationsPanel()
+        case .userModules:   view = makeUserModulesPanel()
         }
 
         currentDetailView?.removeFromSuperview()
@@ -210,16 +214,90 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let divider     = NSBox()
         divider.boxType = .separator
 
-        let stack         = NSStackView(views: [loginCheckbox, divider, updateButton])
+        let exportButton = NSButton(title: "Export Config Backup...", target: self, action: #selector(exportConfigTapped))
+        exportButton.bezelStyle = .rounded
+
+        let importButton = NSButton(title: "Import Config...", target: self, action: #selector(importConfigTapped))
+        importButton.bezelStyle = .rounded
+
+        let importNote = NSTextField(labelWithString: "Import replaces all settings and automations.")
+        importNote.font      = .systemFont(ofSize: 11)
+        importNote.textColor = .secondaryLabelColor
+
+        let divider2     = NSBox()
+        divider2.boxType = .separator
+
+        let stack         = NSStackView(views: [loginCheckbox, divider, updateButton, divider2,
+                                                exportButton, importButton, importNote])
         stack.orientation = .vertical
         stack.alignment   = .leading
         stack.spacing     = 16
         stack.edgeInsets  = NSEdgeInsets(top: 32, left: 32, bottom: 32, right: 32)
 
-        // Divider must span full width despite .leading alignment
-        divider.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        // Dividers must span full width despite .leading alignment
+        divider.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive  = true
+        divider2.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         return stack
+    }
+
+    @objc private func exportConfigTapped() {
+        let panel = NSSavePanel()
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        panel.nameFieldStringValue = "latch-backup-\(df.string(from: Date())).json"
+        panel.allowedContentTypes  = [.json]
+        panel.begin { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            do {
+                try self.configManager.exportConfig(to: url)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText     = "Export failed"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle      = .warning
+                alert.addButton(withTitle: "OK")
+                if let w = self.window { alert.beginSheetModal(for: w) }
+            }
+        }
+    }
+
+    @objc private func importConfigTapped() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes     = [.json]
+        panel.canChooseFiles          = true
+        panel.canChooseDirectories    = false
+        panel.allowsMultipleSelection = false
+        panel.begin { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            let imported: Config
+            do {
+                imported = try self.configManager.decodeImport(from: url)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText     = "Import failed"
+                alert.informativeText = "The file is not a valid latch config: \(error.localizedDescription)"
+                alert.alertStyle      = .warning
+                alert.addButton(withTitle: "OK")
+                if let w = self.window { alert.beginSheetModal(for: w) }
+                return
+            }
+            let confirm = NSAlert()
+            confirm.messageText     = "Replace all settings?"
+            confirm.informativeText = "This will overwrite your current settings and all automations. Script paths may not work if this backup was made on a different machine."
+            confirm.alertStyle      = .warning
+            confirm.addButton(withTitle: "Replace")
+            confirm.addButton(withTitle: "Cancel")
+            confirm.buttons[0].hasDestructiveAction = true
+            guard let w = self.window else { return }
+            confirm.beginSheetModal(for: w) { [weak self] resp in
+                guard let self, resp == .alertFirstButtonReturn else { return }
+                self.configManager.applyImportedConfig(imported)
+                // Rebuild sidebar to reflect new module list
+                self.tableView.reloadData()
+                self.selectRow(0)
+            }
+        }
     }
 
     @objc private func checkForUpdatesTapped() {
@@ -604,6 +682,153 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             stack.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor,     constant: -32),
         ])
         return wrapper
+    }
+
+    // MARK: - User Modules panel
+
+    // Wizard controller kept alive for the window's lifetime
+    private var wizardController: UserModuleWizardController?
+
+    private func makeUserModulesPanel() -> NSView {
+        let modules = configManager.config.userModules
+
+        let titleLabel = NSTextField(labelWithString: "My Automations")
+        titleLabel.font = .boldSystemFont(ofSize: 13)
+
+        let subLabel = NSTextField(wrappingLabelWithString:
+            "Create automations triggered by USB, Bluetooth, or Thunderbolt hardware events.")
+        subLabel.font      = .systemFont(ofSize: 12)
+        subLabel.textColor = .secondaryLabelColor
+
+        let addButton = NSButton(title: "+ New Automation", target: self, action: #selector(addUserModuleTapped))
+        addButton.bezelStyle = .rounded
+
+        var rows: [NSView] = [titleLabel, subLabel, addButton]
+
+        if !modules.isEmpty {
+            let sep = NSBox(); sep.boxType = .separator
+            rows.append(sep)
+
+            for mod in modules {
+                rows.append(makeUserModuleRow(mod))
+            }
+        } else {
+            let emptyLabel = NSTextField(labelWithString: "No automations yet. Click \"+\" to create one.")
+            emptyLabel.font      = .systemFont(ofSize: 12)
+            emptyLabel.textColor = .tertiaryLabelColor
+            rows.append(emptyLabel)
+        }
+
+        let stack         = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment   = .leading
+        stack.spacing     = 12
+        stack.edgeInsets  = NSEdgeInsets(top: 28, left: 28, bottom: 28, right: 28)
+
+        // Separators span full width
+        for v in rows where v is NSBox {
+            v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        return stack
+    }
+
+    private func makeUserModuleRow(_ mod: UserModuleConfig) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let nameLabel = NSTextField(labelWithString: mod.name)
+        nameLabel.font = .systemFont(ofSize: 13)
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let triggerLabel = NSTextField(labelWithString:
+            "\(mod.trigger.eventType.rawValue.capitalized) — \(mod.trigger.deviceName)")
+        triggerLabel.font      = .systemFont(ofSize: 11)
+        triggerLabel.textColor = .secondaryLabelColor
+        triggerLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let toggle = NSButton(checkboxWithTitle: "", target: self, action: #selector(userModuleToggled(_:)))
+        toggle.state = mod.enabled ? .on : .off
+        toggle.toolTip = "Enable / disable"
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        // Store module ID in the button's identifier so the action can find it
+        toggle.identifier = NSUserInterfaceItemIdentifier(mod.id)
+
+        let editButton = NSButton(title: "Edit", target: self, action: #selector(editUserModuleTapped(_:)))
+        editButton.bezelStyle = .rounded
+        editButton.translatesAutoresizingMaskIntoConstraints = false
+        editButton.identifier = NSUserInterfaceItemIdentifier(mod.id)
+
+        row.addSubview(toggle)
+        row.addSubview(nameLabel)
+        row.addSubview(triggerLabel)
+        row.addSubview(editButton)
+
+        NSLayoutConstraint.activate([
+            toggle.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            toggle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+
+            nameLabel.leadingAnchor.constraint(equalTo: toggle.trailingAnchor, constant: 8),
+            nameLabel.topAnchor.constraint(equalTo: row.topAnchor),
+
+            triggerLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
+            triggerLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
+            triggerLabel.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+
+            editButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            editButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            editButton.leadingAnchor.constraint(greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 8),
+
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+        ])
+        return row
+    }
+
+    @objc private func addUserModuleTapped() {
+        openWizard(editing: nil)
+    }
+
+    @objc private func editUserModuleTapped(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue,
+              let mod = configManager.config.userModules.first(where: { $0.id == id }) else { return }
+        openWizard(editing: mod)
+    }
+
+    @objc private func userModuleToggled(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        configManager.setUserModuleEnabled(id: id, enabled: sender.state == .on)
+        moduleRegistry.reloadFromConfig()
+    }
+
+    private func openWizard(editing: UserModuleConfig?) {
+        // Close any existing wizard window before replacing the controller
+        wizardController?.window?.close()
+        wizardController = UserModuleWizardController(configManager: configManager, editing: editing)
+
+        wizardController?.onSave = { [weak self] module in
+            guard let self else { return }
+            if editing != nil {
+                self.configManager.updateUserModule(module)
+            } else {
+                self.configManager.addUserModule(module)
+            }
+            self.moduleRegistry.reloadFromConfig()
+            // Refresh the panel to show the updated list
+            if let idx = self.sidebarItems.firstIndex(of: .userModules) {
+                self.selectRow(idx)
+            }
+        }
+
+        wizardController?.onDelete = { [weak self] id in
+            guard let self else { return }
+            self.configManager.deleteUserModule(id: id)
+            self.moduleRegistry.reloadFromConfig()
+            if let idx = self.sidebarItems.firstIndex(of: .userModules) {
+                self.selectRow(idx)
+            }
+        }
+
+        wizardController?.show()
     }
 
     // MARK: - Dock detection
