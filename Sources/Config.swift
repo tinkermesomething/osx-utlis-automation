@@ -10,13 +10,54 @@ let CONFIG_URL = CONFIG_DIR.appendingPathComponent("config.json")
 let LOG_URL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Logs/latch.log")
 
-// MARK: - Model
+// MARK: - User Module Model
+
+enum TriggerEventType: String, Codable {
+    case usb, bluetooth, thunderbolt
+}
+
+enum ActionKind: String, Codable {
+    case launchApp, quitApp, runScript, none
+}
+
+struct UserModuleAction: Codable {
+    var kind:        ActionKind
+    var appBundleID: String?  // launchApp / quitApp
+    var appName:     String?  // display only
+    var scriptPath:  String?  // runScript
+
+    static let none = UserModuleAction(kind: .none)
+}
+
+struct UserModuleTrigger: Codable {
+    var eventType:       TriggerEventType
+    // USB / Thunderbolt: VID+PID, nil = any device of this type
+    var deviceVendorID:  Int?
+    var deviceProductID: Int?
+    // Bluetooth: hardware address (e.g. "XX:XX:XX:XX:XX:XX"), nil = any BT device
+    var bluetoothAddress: String?
+    var deviceName:      String  // display label chosen by the user
+}
+
+struct UserModuleConfig: Codable, Identifiable {
+    var id:                 String  // UUID string
+    var name:               String
+    var enabled:            Bool
+    var trigger:            UserModuleTrigger
+    var onConnect:          UserModuleAction
+    var onDisconnect:       UserModuleAction
+    var notifyOnConnect:    Bool
+    var notifyOnDisconnect: Bool
+}
+
+// MARK: - Built-in Module Model
 
 struct Config: Codable {
     var keyboardSwitcher  = KeyboardSwitcherConfig()
     var dockWatcher       = DockWatcherConfig()
     var registeredModules = ["keyboard-switcher", "dock-watcher"]
     var skippedVersions   = [String]()
+    var userModules:      [UserModuleConfig] = []
 
     struct KeyboardSwitcherConfig: Codable {
         var enabled:           Bool
@@ -94,6 +135,7 @@ struct Config: Codable {
         registeredModules = try c.decodeIfPresent([String].self, forKey: .registeredModules)
                          ?? ["keyboard-switcher", "dock-watcher"]
         skippedVersions   = try c.decodeIfPresent([String].self, forKey: .skippedVersions) ?? []
+        userModules       = try c.decodeIfPresent([UserModuleConfig].self, forKey: .userModules) ?? []
     }
 }
 
@@ -219,6 +261,51 @@ final class ConfigManager {
     func setKeyboardLayouts(mac: String?, pc: String?) {
         config.keyboardSwitcher.macLayout = mac
         config.keyboardSwitcher.pcLayout  = pc
+        save()
+    }
+
+    // MARK: - User Module CRUD
+
+    func addUserModule(_ module: UserModuleConfig) {
+        config.userModules.append(module)
+        save()
+    }
+
+    func updateUserModule(_ module: UserModuleConfig) {
+        guard let idx = config.userModules.firstIndex(where: { $0.id == module.id }) else { return }
+        config.userModules[idx] = module
+        save()
+    }
+
+    func deleteUserModule(id: String) {
+        config.userModules.removeAll { $0.id == id }
+        save()
+    }
+
+    func setUserModuleEnabled(id: String, enabled: Bool) {
+        guard let idx = config.userModules.firstIndex(where: { $0.id == id }) else { return }
+        config.userModules[idx].enabled = enabled
+        save()
+    }
+
+    // MARK: - Import / Export
+
+    func exportConfig(to url: URL) throws {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try enc.encode(config)
+        try data.write(to: url, options: .atomic)
+    }
+
+    /// Decodes and validates an exported config file. Caller must call applyImportedConfig(_:)
+    /// after confirming with the user.
+    func decodeImport(from url: URL) throws -> Config {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(Config.self, from: data)
+    }
+
+    func applyImportedConfig(_ imported: Config) {
+        config = imported
         save()
     }
 
