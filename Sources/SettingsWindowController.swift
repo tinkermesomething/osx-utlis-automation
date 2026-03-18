@@ -55,13 +55,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private var sidebarItems: [SidebarItem] {
         let active = moduleRegistry.active
-        var items: [SidebarItem] = [.general, .modules]
-        if active.contains(where: { $0.id == "keyboard-switcher" }) { items.append(.keyboard) }
-        if active.contains(where: { $0.id == "dock-watcher" })      { items.append(.dock) }
+        var items: [SidebarItem] = [.general]
         // Notifications tab appears when at least one module with notification settings is active
         if active.contains(where: { $0.id == "keyboard-switcher" || $0.id == "dock-watcher" }) {
             items.append(.notifications)
         }
+        items.append(.modules)
+        if active.contains(where: { $0.id == "keyboard-switcher" }) { items.append(.keyboard) }
+        if active.contains(where: { $0.id == "dock-watcher" })      { items.append(.dock) }
         return items
     }
 
